@@ -1,0 +1,24 @@
+# Synthetic fixture for CI. Same table and column names as the real-data load.
+# pk / fk / cast describe the tables for staging and tests; the generator ignores them.
+seed: 1818
+tables:
+  - name: feeders
+    rows: 40
+    pk: feeder_id
+    columns:
+      feeder_id: {type: id, prefix: F, width: 3}
+      substation: {type: choice, values: [Alausa, Ikorodu, Oshodi, Agege, Ikeja GRA]}
+      latitude: {type: float, low: 6.45, high: 6.70, decimals: 5}
+      longitude: {type: float, low: 3.25, high: 3.50, decimals: 5}
+      customers_served: {type: int, low: 500, high: 5000}
+  - name: outages
+    rows: 600
+    pk: outage_id
+    fk: {feeder_id: feeders.feeder_id}
+    columns:
+      outage_id: {type: id, prefix: OUT}
+      feeder_id: {type: fk, table: feeders, column: feeder_id}
+      start_ts: {type: timestamp, start: 2025-01-01, end: 2025-06-30}
+      duration_minutes: {type: expr, expr: "np.maximum(1, rng.lognormal(4.5, 0.9, n).astype(int))"}
+      cause: {type: choice, values: [fault, load_shedding, planned, weather], p: [0.4, 0.3, 0.2, 0.1]}
+      customers_affected: {type: expr, expr: "(df.feeder_id.map(tables['feeders'].set_index('feeder_id').customers_served).to_numpy() * rng.uniform(0.2, 1.0, n)).astype(int)"}

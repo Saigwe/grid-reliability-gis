@@ -1,0 +1,21 @@
+version: 2
+models:
+- name: stg_bronze__feeders
+  columns:
+  - name: feeder_id
+    data_tests:
+    - unique
+    - not_null
+- name: stg_bronze__outages
+  columns:
+  - name: outage_id
+    data_tests:
+    - unique
+    - not_null
+  - name: feeder_id
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('stg_bronze__feeders')
+          field: feeder_id

@@ -1,0 +1,10 @@
+version: 2
+models:
+  - name: rpt_reliability_monthly
+    columns:
+      - name: outage_month
+        data_tests: [unique, not_null]
+  - name: rpt_feeder_reliability
+    columns:
+      - name: feeder_id
+        data_tests: [unique, not_null]
