@@ -17,4 +17,4 @@
 {% macro length_m(geom) %}ST_Length({{ to_bng(geom) }}){% endmacro %}
 
 {# Minutes between two timestamps. #}
-{% macro minutes_between(start, end) %}(extract(epoch from {{ end }}) - extract(epoch from {{ start }})) / 60.0{% endmacro %}
+{% macro minutes_between(start, end) %}cast((extract(epoch from {{ end }}) - extract(epoch from {{ start }})) / 60.0 as double precision){% endmacro %}

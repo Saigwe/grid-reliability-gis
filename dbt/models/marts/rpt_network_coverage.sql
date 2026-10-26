@@ -13,7 +13,7 @@ ukpn as (
         cast(primary_substation as integer)                             as ukpn_primary,
         cast(grid_substation as integer)                                as ukpn_grid,
         cast(secondary_substations_gm as integer) + cast(secondary_substations_pm as integer) as ukpn_secondary,
-        cast(no_of_customers as double) * 1000000                       as ukpn_customers
+        cast(no_of_customers as double precision) * 1000000                       as ukpn_customers
     from {{ source('bronze', 'network_statistics') }}
     where licence_area like 'London%'
 ),
