@@ -1,129 +1,73 @@
-"""Generate a small synthetic fixture from tests/fixtures/fixture_spec.yml into DuckDB `bronze`.
+"""Synthetic raw files in the exact formats of the real downloads (UKPN, ONS/Nomis, OSM Overpass), so CI runs
+the real loader, the spatial dbt models (DuckDB and PostGIS), the outage simulation and the map, offline.
+A small made-up city: 2 zones, 12 primary substations, 150 LSOAs, a few live outages.
 
-The fixture lets CI run the whole pipeline without downloading the real dataset. It has the
-same table and column names as the real-data load. Tables are built in the order listed, so a
-table can reference any table above it.
-
-Column types
-- id        prefix + zero-padded sequence                  {type: id, prefix: C}
-- fk        random key from an earlier table               {type: fk, table: customers, column: customer_id, unique: false}
-- int       uniform integer, inclusive                     {type: int, low: 1, high: 10}
-- float     uniform or lognormal, rounded                  {type: float, low: 0, high: 1} | {type: float, dist: lognormal, mean: 3, sigma: 1}
-- choice    pick from values, optional weights             {type: choice, values: [a, b], p: [0.8, 0.2]}
-- bool      true with probability p                        {type: bool, p: 0.1}
-- date      uniform date (midnight timestamp)              {type: date, start: 2025-01-01, end: 2025-06-30}
-- timestamp uniform timestamp                              {type: timestamp, start: 2025-01-01, end: 2025-06-30}
-- expr      a Python expression over df, tables, rng, n, np, pd
-Any column can add `null_p` (share of nulls). Columns with `drop: true` are helpers and are not saved.
-
-Table options
-- rows: N                         number of rows
-- grid: {parent: t.col, start, end, freq, column}   one row per parent key x date in pd.date_range
-- data: {columns: [...], rows: [[...], ...]}        fixed reference rows
-- duplicate: {rows, id_column, shift_column, shift_minutes}   copies rows (id + 'D'), to test dedup/controls
+Usage: python tests/fixtures/make_fixture.py --raw data/fixture/raw
 """
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
-import duckdb
 import numpy as np
-import pandas as pd
-import yaml
-
-HERE = Path(__file__).resolve().parent
 
 
-def make_column(name: str, spec: dict, n: int, df: pd.DataFrame, tables: dict, rng: np.random.Generator):
-    kind = spec["type"]
-    if kind == "id":
-        width = spec.get("width", 6)
-        return [f"{spec['prefix']}{i:0{width}d}" for i in range(1, n + 1)]
-    if kind == "fk":
-        keys = tables[spec["table"]][spec["column"]].dropna().to_numpy()
-        return rng.choice(keys, size=n, replace=not spec.get("unique", False))
-    if kind == "int":
-        return rng.integers(spec["low"], spec["high"] + 1, size=n)
-    if kind == "float":
-        if spec.get("dist") == "lognormal":
-            values = rng.lognormal(spec["mean"], spec["sigma"], n)
-        else:
-            values = rng.uniform(spec["low"], spec["high"], n)
-        return np.round(values, spec.get("decimals", 2))
-    if kind == "choice":
-        return rng.choice(spec["values"], size=n, p=spec.get("p"))
-    if kind == "bool":
-        return rng.random(n) < spec["p"]
-    if kind in ("date", "timestamp"):
-        start, end = pd.Timestamp(spec["start"]), pd.Timestamp(spec["end"])
-        span = int((end - start).total_seconds())
-        offsets = rng.integers(0, span + 1, size=n)
-        values = start + pd.to_timedelta(offsets, unit="s")
-        return values.normalize() if kind == "date" else values
-    if kind == "expr":
-        return eval(spec["expr"], {"np": np, "pd": pd}, {"df": df, "tables": tables, "rng": rng, "n": n})
-    raise ValueError(f"{name}: unknown column type {kind!r}")
-
-
-def build_table(spec: dict, tables: dict, rng: np.random.Generator) -> pd.DataFrame:
-    if "data" in spec:
-        return pd.DataFrame(spec["data"]["rows"], columns=spec["data"]["columns"])
-
-    if "grid" in spec:
-        g = spec["grid"]
-        dates = pd.date_range(g["start"], g["end"], freq=g["freq"])
-        if "parent" in g:
-            table, col = g["parent"].split(".")
-            keys = tables[table][col].to_numpy()
-            df = pd.DataFrame({col: np.repeat(keys, len(dates)), g["column"]: np.tile(dates, len(keys))})
-        else:
-            df = pd.DataFrame({g["column"]: dates})
-    else:
-        df = pd.DataFrame(index=range(spec["rows"]))
-
-    n = len(df)
-    for name, col in (spec.get("columns") or {}).items():
-        values = make_column(name, col, n, df, tables, rng)
-        df[name] = pd.Series(values, index=df.index) if not isinstance(values, pd.Series) else values.to_numpy()
-        if col.get("null_p"):
-            df.loc[rng.random(n) < col["null_p"], name] = None
-
-    if "duplicate" in spec:
-        d = spec["duplicate"]
-        dup = df.sample(d["rows"], random_state=int(rng.integers(1_000_000_000))).copy()
-        if d.get("id_column"):
-            dup[d["id_column"]] = dup[d["id_column"]] + "D"
-        if d.get("shift_column"):
-            dup[d["shift_column"]] = dup[d["shift_column"]] + pd.to_timedelta(d.get("shift_minutes", 1), unit="m")
-        for col, jitter in (d.get("jitter") or {}).items():
-            dup[col] = np.round(dup[col] * (1 + rng.normal(0, jitter, len(dup))), 2)
-        df = pd.concat([df, dup], ignore_index=True)
-
-    helpers = [name for name, col in (spec.get("columns") or {}).items() if col.get("drop")]
-    return df.drop(columns=helpers)
+def square(lon0, lat0, lon1, lat1):
+    return [[[lon0, lat0], [lon1, lat0], [lon1, lat1], [lon0, lat1], [lon0, lat0]]]
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--db", required=True)
-    ap.add_argument("--spec", default=str(HERE / "fixture_spec.yml"))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--raw", type=Path, default=Path("data/fixture/raw"))
     args = ap.parse_args()
+    rng = np.random.default_rng(18)
+    raw = args.raw
+    raw.mkdir(parents=True, exist_ok=True)
+    zones = {"West": square(-0.30, 51.40, -0.10, 51.60), "East": square(-0.10, 51.40, 0.10, 51.60)}
+    (raw / "lpn-operational-zones.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"ops_area": z}, "geometry": {"type": "Polygon", "coordinates": c}}
+        for z, c in zones.items()]}))
 
-    spec = yaml.safe_load(Path(args.spec).read_text(encoding="utf-8"))
-    rng = np.random.default_rng(spec.get("seed", 42))
-    tables: dict[str, pd.DataFrame] = {}
-    for table in spec["tables"]:
-        tables[table["name"]] = build_table(table, tables, rng)
+    lons, lats = rng.uniform(-0.29, 0.09, 150), rng.uniform(51.41, 51.59, 150)
+    codes = [f"E0199{i:04d}" for i in range(150)]
+    outside = {"type": "Feature", "properties": {"LSOA21CD": "W01000001"}, "geometry": {"type": "Point", "coordinates": [-3.2, 51.5]}}
+    (raw / "lsoa-centroids.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": [outside] + [
+        {"type": "Feature", "properties": {"LSOA21CD": c}, "geometry": {"type": "Point", "coordinates": [x, y]}}
+        for c, x, y in zip(codes, lons, lats)]}))
+    (raw / "households.csv").write_text('"GEOGRAPHY_CODE","OBS_VALUE"\n' + '"W01000001",600\n'
+                                        + "".join(f'"{c}",{h}\n' for c, h in zip(codes, rng.integers(450, 900, 150))))
 
-    Path(args.db).parent.mkdir(parents=True, exist_ok=True)
-    with duckdb.connect(args.db) as con:
-        con.execute("create schema if not exists bronze")
-        for name, df in tables.items():
-            con.register("df", df)
-            con.execute(f"create or replace table bronze.{name} as select * from df")
-            con.unregister("df")
-            print(f"bronze.{name:<28} {len(df):>9,} rows")
+    elements = []
+    for i in range(12):
+        elements.append({"type": "node", "id": 1000 + i, "lat": float(rng.uniform(51.42, 51.58)), "lon": float(rng.uniform(-0.28, 0.08)),
+                         "tags": {"power": "substation", "voltage": "33000;11000", "operator": "UK Power Networks", "name": f"Primary {i}"}})
+    for i in range(30):
+        elements.append({"type": "node", "id": 2000 + i, "lat": float(rng.uniform(51.41, 51.59)), "lon": float(rng.uniform(-0.29, 0.09)),
+                         "tags": {"power": "substation", "substation": "minor_distribution"}})
+    elements.append({"type": "way", "id": 3000, "tags": {"power": "substation", "substation": "traction", "operator": "Network Rail"},
+                     "geometry": [{"lat": 51.5, "lon": -0.2}, {"lat": 51.501, "lon": -0.199}, {"lat": 51.5, "lon": -0.198}]})
+    elements.append({"type": "way", "id": 4000, "tags": {"power": "cable", "voltage": "132000"},
+                     "geometry": [{"lat": 51.45, "lon": -0.25}, {"lat": 51.5, "lon": -0.1}, {"lat": 51.55, "lon": 0.05}]})
+    (raw / "osm-power.json").write_text(json.dumps({"elements": elements}))
+
+    live = [{"incidentreference": f"INCD-9{i:05d}-Z", "powercuttype": ["Unplanned", "Restored", "Planned"][i % 3],
+             "creationdatetime": f"2026-10-2{5 + i % 2}T0{i % 9}:15:00", "restoreddatetime": f"2026-10-2{5 + i % 2}T1{i % 9}:00:00" if i % 3 == 1 else None,
+             "nocustomeraffected": int(rng.integers(5, 300)), "incidentcategory": 1,
+             "geopoint": {"lon": float(rng.uniform(-0.28, 0.08)), "lat": float(rng.uniform(51.42, 51.58))}} for i in range(6)]
+    (raw / "live-faults.json").write_text(json.dumps(live))
+    national = [{"fault_id": "INCD-900001-Z", "licence_area": "London", "voltage": "LV", "planned": "FALSE",
+                 "outage_start_date": "2026-10-25T00:15:00+00:00", "date_of_restoration": None,
+                 "geo_point_2d": live[0]["geopoint"]},
+                {"fault_id": "INCD-800001-X", "licence_area": "London", "voltage": "LV", "planned": "FALSE",
+                 "outage_start_date": "2026-10-25T03:10:00+00:00", "date_of_restoration": "2026-10-25T03:11:00+00:00",
+                 "geo_point_2d": {"lon": -0.15, "lat": 51.5}}]
+    (raw / "national-outages.json").write_text(json.dumps(national))
+    stats = {"licence_area": "London Power Networks (LPN)", "no_of_customers": "0.1", "main_substations_grid_primary": 20,
+             "grid_substation": 4, "primary_substation": 16, "secondary_substations_gm": 40, "secondary_substations_pm": 0,
+             "hv_cables_underground": 100, "hv_cables_overhead_lines": 0, "lv_cables_underground": 200}
+    (raw / "network-statistics.json").write_text(json.dumps([stats]))
+    print(f"wrote fixture sources to {raw}")
 
 
 if __name__ == "__main__":

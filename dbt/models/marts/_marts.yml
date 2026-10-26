@@ -1,10 +1,55 @@
 version: 2
+
 models:
+  - name: fct_interruption
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [outage_id, lsoa_code, stage]
+  - name: dim_primary_substation
+    columns:
+      - name: primary_id
+        data_tests: [unique, not_null]
   - name: rpt_reliability_monthly
-    columns:
-      - name: outage_month
-        data_tests: [unique, not_null]
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [primary_id, month]
   - name: rpt_feeder_reliability
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [primary_id, year]
+  - name: rpt_lsoa_reliability
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [lsoa_code, year]
+  - name: rpt_live_outages
     columns:
-      - name: feeder_id
+      - name: outage_ref
         data_tests: [unique, not_null]
+
+unit_tests:
+  - name: indices_count_unplanned_interruptions_of_three_minutes_or_more
+    description: A 2-minute auto-reclose and planned works never count; restoration stages split customers.
+    model: fct_interruption
+    given:
+      - input: ref('stg_outages')
+        format: sql
+        rows: |
+          select * from (values
+            ('O1', 'P', 'HV', false, 'cable fault', timestamp '2025-01-01 10:00:00', 'L1', 1, 70, timestamp '2025-01-01 10:45:00'),
+            ('O1', 'P', 'HV', false, 'cable fault', timestamp '2025-01-01 10:00:00', 'L1', 2, 30, timestamp '2025-01-01 13:00:00'),
+            ('O2', 'P', 'HV', false, 'cable fault', timestamp '2025-01-02 10:00:00', 'L1', 1, 100, timestamp '2025-01-02 10:02:00'),
+            ('O3', 'P', 'HV', true, 'planned works', timestamp '2025-01-03 09:00:00', 'L1', 1, 50, timestamp '2025-01-03 13:00:00')
+          ) as t(outage_id, primary_id, voltage_level, planned, cause, started_at, lsoa_code, stage, customers, restored_at)
+      - input: ref('int_customer_feeder')
+        format: sql
+        rows: select 'L1' as lsoa_code, 'Central' as zone
+    expect:
+      rows:
+        - {outage_id: O1, stage: 1, duration_min: 45.0, counts_for_indices: true, is_short_interruption: false}
+        - {outage_id: O1, stage: 2, duration_min: 180.0, counts_for_indices: true, is_short_interruption: false}
+        - {outage_id: O2, stage: 1, duration_min: 2.0, counts_for_indices: false, is_short_interruption: true}
+        - {outage_id: O3, stage: 1, duration_min: 240.0, counts_for_indices: false, is_short_interruption: false}

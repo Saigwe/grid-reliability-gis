@@ -1,21 +1,29 @@
 version: 2
 models:
-- name: stg_bronze__feeders
-  columns:
-  - name: feeder_id
+  - name: stg_lsoa_customers
+    columns:
+      - name: lsoa_code
+        data_tests: [unique, not_null]
+      - name: households
+        data_tests: [not_null]
+  - name: stg_osm_substations
+    columns:
+      - name: osm_id
+        data_tests: [unique, not_null]
+      - name: network_level
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [primary, grid, secondary, traction, unclassified]
+  - name: stg_outages
     data_tests:
-    - unique
-    - not_null
-- name: stg_bronze__outages
-  columns:
-  - name: outage_id
-    data_tests:
-    - unique
-    - not_null
-  - name: feeder_id
-    data_tests:
-    - not_null
-    - relationships:
-        arguments:
-          to: ref('stg_bronze__feeders')
-          field: feeder_id
+      - unique_combination:
+          arguments:
+            columns: [outage_id, lsoa_code, stage]
+    columns:
+      - name: lsoa_code
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_lsoa_customers')
+                field: lsoa_code

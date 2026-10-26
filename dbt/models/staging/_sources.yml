@@ -1,7 +1,17 @@
 version: 2
 sources:
 - name: bronze
-  description: Raw tables, loaded by the fixture generator (CI) or the real-data loaders.
+  description: Raw open data (ingestion/load.py) and the synthetic outage history (ingestion/simulate_outages.py).
   tables:
-  - name: feeders
-  - name: outages
+  - name: lsoa_centroids
+  - name: households
+  - name: lpn_zones
+  - name: osm_substations
+  - name: osm_lines
+  - name: live_faults
+  - name: national_outages
+  - name: network_statistics
+  - name: outage_events
+    description: SYNTHETIC two-year outage history, one row per outage.
+  - name: outage_impacts
+    description: SYNTHETIC customers interrupted per outage, LSOA and restoration stage.

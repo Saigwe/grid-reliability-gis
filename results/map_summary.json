@@ -1,0 +1,14 @@
+{
+ "year": 2025,
+ "resolution": 8,
+ "hexes": 897,
+ "lsoas": 2914,
+ "households": 2039005,
+ "london_ci_per_100": 22.4,
+ "london_cml": 23.3,
+ "hex_cml_median": 9.9,
+ "hex_cml_p95": 91.0,
+ "worst_decile_hexes": 89,
+ "worst_decile_households": 185003,
+ "worst_decile_cml": 100.0
+}

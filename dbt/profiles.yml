@@ -1,8 +1,18 @@
 # Kept in-repo so CI and reviewers can run it. Secrets come from environment variables only.
 grid_reliability_gis:
-  target: duckdb
+  target: "{{ env_var('DBT_TARGET', 'duckdb') }}"
   outputs:
     duckdb:
       type: duckdb
-      path: "{{ env_var('DUCKDB_PATH', '../warehouse/grid_reliability_gis.duckdb') }}"
+      path: "{{ env_var('DUCKDB_PATH', '../warehouse/grid.duckdb') }}"
+      extensions: [spatial]
+      threads: 4
+    postgis:
+      type: postgres
+      host: "{{ env_var('PGHOST', 'localhost') }}"
+      port: "{{ env_var('PGPORT', '5432') | as_number }}"
+      user: "{{ env_var('PGUSER', 'postgres') }}"
+      password: "{{ env_var('PGPASSWORD', '') }}"
+      dbname: "{{ env_var('PGDATABASE', 'grid') }}"
+      schema: public
       threads: 4

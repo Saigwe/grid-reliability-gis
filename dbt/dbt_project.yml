@@ -12,11 +12,21 @@ target-path: target
 clean-targets:
 - target
 - dbt_packages
+vars:
+  # Customer interruptions and minutes lost count only unplanned interruptions of at least 3 minutes (the
+  # regulatory definition); shorter ones are reported as short interruptions.
+  min_interruption_minutes: 3
+  first_month: "2024-01-01"
+  last_month: "2025-12-01"
+
 models:
   grid_reliability_gis:
     staging:
       +schema: silver
       +materialized: view
+    intermediate:
+      +schema: silver
+      +materialized: table
     marts:
       +schema: gold
       +materialized: table
