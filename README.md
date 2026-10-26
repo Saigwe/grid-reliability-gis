@@ -111,7 +111,7 @@ make postgis-fixture         # then the same dbt project on PostGIS (set PGHOST,
 - [x] Interactive map in the README and portfolio
 - [ ] UKPN asset registers (needs a free portal account) to replace nearest-substation with real connectivity
 - [ ] Collect UKPN's live outage feed on a schedule to build a real fault history
-- [ ] 3-minute Loom walkthrough
+- [ ] 3-minute Loom walkthrough ([script ready](docs/walkthrough.md))
 
 ## Interview topics this project prepares
 - Spatial SQL: projections (WGS84 vs British National Grid), point-in-polygon, nearest neighbour, H3
